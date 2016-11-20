@@ -23,7 +23,7 @@ setup-dirs:
 	@mkdir -p bin
 
 fmt:
-	@$(GO) fmt loader memory parser simulator util
+	@$(GO) fmt actions types
 
 
 slave:

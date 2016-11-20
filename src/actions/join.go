@@ -1,13 +1,15 @@
 package actions
 
 import (
-		"fmt"
-		"net"
-		"os"
+	"fmt"
+	"net"
+	"os"
 
-		"types"
+	"types"
 )
 
+// This thread will listen on TCP at the given port for any slaves to
+// join the ring.
 func ListenForJoinRequests(serverAddr *net.TCPAddr) {
 	// Start listening on the given port.
 	listener, err := net.ListenTCP("tcp", serverAddr)
@@ -48,8 +50,8 @@ func ListenForJoinRequests(serverAddr *net.TCPAddr) {
 			fmt.Printf("Recieved %s from client\n", showBytes(buf[:n]))
 		}
 
-		magicNumber := uint16(buf[1]) << 8 + uint16(buf[2])
-		if magicNumber != MagicNumber { 
+		magicNumber := uint16(buf[1])<<8 + uint16(buf[2])
+		if magicNumber != MagicNumber {
 			fmt.Fprintf(os.Stderr, "Did not recieve '0x%04x', got 0x%04x\n",
 				MagicNumber, magicNumber)
 			conn.Close()
@@ -58,7 +60,7 @@ func ListenForJoinRequests(serverAddr *net.TCPAddr) {
 
 		// Build the response.
 		response := &types.ServerResponse{
-			YourRID: nextRID,
+			YourRID:     nextRID,
 			NextSlaveIP: nextHostAddr,
 		}
 
@@ -75,7 +77,7 @@ func ListenForJoinRequests(serverAddr *net.TCPAddr) {
 		if tcpAddr, ok := remoteAddr.(*net.TCPAddr); ok {
 			nextHostAddr = tcpAddr.IP
 			fmt.Println(nextHostAddr.String())
-			nextPort := int(MY_GID) * 5 + int(nextRID) + 10010
+			nextPort := int(MY_GID)*5 + int(nextRID) + 10010
 			nextAddr := fmt.Sprintf("%s:%d", nextHostAddr.String(), nextPort)
 			outgoingAddr, err := net.ResolveUDPAddr("udp", nextAddr)
 			if err != nil {

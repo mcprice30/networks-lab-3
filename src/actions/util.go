@@ -1,12 +1,12 @@
 package actions
 
 import (
-		"fmt"
-		"net"
-		"os"
-		"sync"
+	"fmt"
+	"net"
+	"os"
+	"sync"
 
-		"types"
+	"types"
 )
 
 const MY_GID byte = 11
@@ -28,25 +28,29 @@ func sendMessage(datagram *types.RingMessage) {
 		fmt.Fprintln(os.Stderr, "ERROR: ", err)
 		return
 	}
-	fmt.Printf("Sent bytes: %v", msgBytes)
+	fmt.Printf("Sent bytes: %s\n", showBytes(msgBytes))
 }
 
 func GetMyIP() net.IP {
 	ifaces, err := net.Interfaces()
-	if err != nil { return nil }
+	if err != nil {
+		return nil
+	}
 	var out net.IP
 
 	for _, i := range ifaces {
 		addrs, err := i.Addrs()
-		if err != nil { continue }
+		if err != nil {
+			continue
+		}
 		for _, addr := range addrs {
 			switch v := addr.(type) {
 			case *net.IPNet:
-				if (out == nil || out.IsLoopback()) {
+				if out == nil || out.IsLoopback() {
 					out = v.IP
 				}
 			case *net.IPAddr:
-				if (out == nil || out.IsLoopback()) {
+				if out == nil || out.IsLoopback() {
 					out = v.IP
 				}
 			}
@@ -58,7 +62,9 @@ func GetMyIP() net.IP {
 func showBytes(in []byte) string {
 	out := "["
 	for i, b := range in {
-		if i > 0 { out += " " }
+		if i > 0 {
+			out += " "
+		}
 		out += fmt.Sprintf("%02x", b)
 	}
 	return (out + "]")

@@ -129,8 +129,7 @@ int main(int argc, char *argv[])
 	gid = response_packet.gid;
 	magic_num = ntohs(response_packet.magic_num);
 	this_rid = response_packet.rid;
-    response_packet.next_IP = ntohl(response_packet.next_IP);
-	next_IP = response_packet.next_IP;
+	next_IP = ntohl(response_packet.next_IP);
 
 	if (magic_num != MAGIC_NUMBER) {
 		printf("Error: Server response contained wrong \"magic number\" value.");
@@ -169,15 +168,14 @@ void *forwarding_loop(void *arg) {
 	int sockfd;
 	char this_port_number[10];
 	struct ring_message message_packet;
-	int numbytes;
-	uint8_t checksum;
+	size_t numbytes, numbytes_old;
 	struct sockaddr_in next_addr;
 
 	//we will need a decimal string expressing the port number
 	sprintf(this_port_number,"%d", BASE_PORT + 5*args->gid + (args->this_rid));
 	printf("%s\n", this_port_number);
 	//set up a socket
-    memset(&hints, 0, sizeof hints);
+	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_INET;  // use IPv4 or IPv6, whichever
 	hints.ai_socktype = SOCK_DGRAM;
 	hints.ai_flags = AI_PASSIVE;
@@ -205,7 +203,7 @@ void *forwarding_loop(void *arg) {
 	memset(&next_addr, 0, sizeof next_addr);
 	next_addr.sin_family = AF_INET;
 	next_addr.sin_port = htons(BASE_PORT + 5*args->gid + (args->this_rid-1));
-	next_addr.sin_addr.s_addr = args->next_IP;
+	next_addr.sin_addr.s_addr = htonl(args->next_IP);
 
 	while (1) {
 		memset(&message_packet, 0, sizeof message_packet);
@@ -214,30 +212,35 @@ void *forwarding_loop(void *arg) {
 		    perror("recvfrom");
 		    exit(1);
 		}
-		if ((numbytes != (sizeof message_packet))) {
-			printf("\nPacket received with incorrect length.\n");
-			continue;
-		}
-		if (message_packet.magic_num != MAGIC_NUMBER) {
+		// printf("\nProcessing packet...\n");
+		if (ntohs(message_packet.magic_num) != MAGIC_NUMBER) {
 			printf("\nPacket received with incorrect \"magic number\" value.\n");
 			continue;
 		}
-		checksum = compute_checksum((void *)(&message_packet), (sizeof message_packet)-1);
-		if ( checksum != message_packet.checksum) {
-			printf("\nPacket received with incorrect checksum. Needed %#x, found %#x.\n", checksum, message_packet.checksum);
+		if ( compute_checksum((void*)(&message_packet), numbytes) != 0) {
+			printf("\nPacket received with incorrect checksum.\n");
 			continue;
 		}
 
 		if (message_packet.rid_dest == args->this_rid) {
-			printf("Received message: %s\n", message_packet.message);
+			//TODO deal with packet sizes or somethign
+			//set checksum to 0 so that print statement doesn't get pissed or whatever?
+			((uint8_t *)(&message_packet))[numbytes-1] = '\0';
+			printf("\nReceived message: %s\n", message_packet.message);
 		} else if (message_packet.ttl > 1) {
 			//Decrease the TTL value of the packet, and forward it to next_addr
 			message_packet.ttl--;
-			if ((numbytes = sendto(sockfd, (void *)(&message_packet), sizeof message_packet, 0,
+			((uint8_t *)(&message_packet))[numbytes-1] = 0;
+			((uint8_t *)(&message_packet))[numbytes-1] = compute_checksum((void*)(&message_packet), (sizeof message_packet) - 1);
+			numbytes_old = numbytes;
+			if ((numbytes = sendto(sockfd, (void *)(&message_packet), numbytes_old, 0,
 					 (struct sockaddr *)(&next_addr), sizeof next_addr)) == -1) {
 				perror("error forwarding packet: sendto");
 				exit(1);
 			}
+			// printf("\nForwarded packet.\n");
+		} else {
+			// printf("\nDiscarded packet.\n");
 		}
 
 	}
@@ -247,9 +250,66 @@ void *forwarding_loop(void *arg) {
 
 void *sending_loop(void *arg) {
 	struct thread_args *args = (struct thread_args *)arg;
+	struct sockaddr_in next_addr;
+	int sockfd;
+	size_t numbytes;
+	struct ring_message message_packet;
+	int dest_rid;
+	char *line = NULL;
+	size_t message_len;
 
-	while (0) {
+	//get a socket for the outgoing messages
+	if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
+		perror("send: socket");
+		exit(1);
+	}
 
+	//initialize struct for next node's address info
+	memset(&next_addr, 0, sizeof next_addr);
+	next_addr.sin_family = AF_INET;
+	next_addr.sin_port = htons(BASE_PORT + 5*args->gid + (args->this_rid-1));
+	next_addr.sin_addr.s_addr = htonl(args->next_IP);
+
+	while (1) {
+		printf("Input ring ID of destination:");
+		fflush(stdout);
+		getline(&line, &numbytes, stdin);
+		if (sscanf(line, "%d", &dest_rid) < 1) {
+			continue;
+		}
+		printf("Input message to send:");
+		fflush(stdout);
+		message_len=getline(&line, &numbytes, stdin);
+		if ((line)[message_len - 1] == '\n') {
+	    (line)[message_len - 1] = '\0';
+		}
+		message_len--;
+
+		//TODO make sure this was right. Currently subtracting 1 to make room for a null terminator.
+		if (message_len > MAX_MESSAGE_LENGTH-1) {
+			printf("Message too long.\n");
+		} else if (message_len <1) {
+			printf("Message too short.\n");
+		} else {
+			memset(&message_packet, 0, sizeof message_packet);
+		  message_packet.gid = args->gid;;
+		  message_packet.magic_num = htons(MAGIC_NUMBER);
+		  message_packet.ttl = INITIAL_TTL;
+		  message_packet.rid_source = args->this_rid;
+		  message_packet.rid_dest = dest_rid;
+			strcpy(message_packet.message, line);
+			message_packet.message[message_len+1] = compute_checksum((void*)(&message_packet), (sizeof message_packet) - 1);
+
+			if ((numbytes = sendto(sockfd, (void *)(&message_packet), (sizeof message_packet) - (MAX_MESSAGE_LENGTH-1-message_len), 0,
+					 (struct sockaddr *)(&next_addr), sizeof next_addr)) == -1) {
+				perror("error sending packet: sendto");
+				exit(1);
+			}
+
+			printf("message sent. %s %d\n",message_packet.message, (int) numbytes);
+		}
+		free(line);
+		line = NULL;
 	}
 	printf("---exiting send loop thread---\n");
 	return NULL;
